@@ -1,0 +1,158 @@
+# THE FORGE  |  Copyright (c) 2026 Yannie D. Forest. All rights reserved.
+# NO LICENCE IS GRANTED. See LICENCE.txt.
+#
+# Builds the APK of The Forge for the Fire tablet (or any Android device) on
+# GitHub's own computers. It runs by itself every time something is uploaded
+# (committed) to the repository, and can also be started by hand from the
+# Actions tab ("Build The Forge APK", then "Run workflow").
+#
+# When it finishes, the APK is in two places:
+#   1. The Releases page of the repository, as the-forge.apk. This is the one
+#      to use on the tablet.
+#   2. The run's own page, under "Artifacts", as a zip (needs a computer).
+#
+# Made by The Forge from the recipe that builds Carpe Diem for the Fire tablet.
+
+name: Build The Forge APK
+
+on:
+  push:
+    # an iPhone and iPad project kept in the same repository builds on its own
+    paths-ignore:
+      - 'iphone-ipad/**'
+      - '.github/workflows/build-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Get the project
+        uses: actions/checkout@v4
+
+      - name: Find the Gradle project
+        # Works whether the project was uploaded at the top of the repository
+        # or inside a folder.
+        run: |
+          F=$(find . -name settings.gradle -not -path './.git/*' | head -n 1)
+          if [ -z "$F" ]; then
+            echo "No settings.gradle found. Upload the CONTENTS of the Fire tablet project folder."
+            exit 1
+          fi
+          D=$(dirname "$F")
+          echo "Project folder: $D"
+          echo "PROJ=$D" >> "$GITHUB_ENV"
+
+      - name: Prepare Java and the Android tools
+        run: |
+          # Java 17 is already on GitHub's computers.
+          echo "JAVA_HOME=${JAVA_HOME_17_X64:-$JAVA_HOME}" >> "$GITHUB_ENV"
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n 1)
+          if [ -n "$SDKM" ]; then
+            yes | "$SDKM" --licenses > /dev/null
+            "$SDKM" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+            echo "Android tools ready in $SDK"
+          else
+            echo "sdkmanager not found; the Android plugin will fetch what it needs."
+          fi
+
+      - name: Get Gradle 8.7
+        # Pinned on purpose: a newer Gradle cannot run this project's Android
+        # plugin, and a run that relied on whatever Gradle the computer had
+        # could break without any change on our side.
+        run: |
+          curl -sSL --retry 4 -o "$RUNNER_TEMP/gradle.zip" https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gradle-8.7/bin" >> "$GITHUB_PATH"
+
+      - name: Make the permanent signing key (first build only)
+        # Android installs a new APK over the old one only when both are signed
+        # with the SAME key; otherwise the tablet says "App not installed".
+        # The first build makes the key and saves it in this repository, in the
+        # folder "signing". Every later build finds it there and uses it.
+        run: |
+          cd "$PROJ"
+          if [ -f signing/signing.properties ] || [ -f app/carpe-diem.keystore ]; then
+            echo "The permanent signing key is already in the repository. It will be used."
+            exit 0
+          fi
+          mkdir -p signing
+          PW=$(openssl rand -hex 16)
+          keytool -genkeypair -noprompt -keystore signing/app.keystore -storetype PKCS12 \
+            -storepass "$PW" -keypass "$PW" -alias app -keyalg RSA -keysize 2048 -validity 36500 \
+            -dname "CN=The Forge, O=Yannie D. Forest"
+          printf 'storeFile=app.keystore\nstorePassword=%s\nkeyAlias=app\nkeyPassword=%s\n' "$PW" "$PW" > signing/signing.properties
+          echo "NEW_KEY=1" >> "$GITHUB_ENV"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add signing
+          git commit -m "Keep the permanent signing key for The Forge"
+          git pull --rebase origin "$GITHUB_REF_NAME" || true
+          if git push origin "HEAD:$GITHUB_REF_NAME"; then
+            echo "The new key is saved in the repository, in the folder signing."
+          else
+            echo "::warning::The signing key could not be saved in the repository. Download 'signing-key-keep-this' from this run's Artifacts and upload its files into a folder named signing in the project, or the next build will make a different key."
+          fi
+
+      - name: Keep a copy of a new signing key with this run
+        if: env.NEW_KEY == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-key-keep-this
+          path: ${{ env.PROJ }}/signing
+          if-no-files-found: warn
+
+      - name: Build the APK
+        run: |
+          cd "$PROJ"
+          set -o pipefail
+          gradle --no-daemon :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/build-log.txt"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/the-forge.apk"
+          ls -la "$GITHUB_WORKSPACE/the-forge.apk"
+
+      - name: If the build failed, show why
+        if: failure()
+        run: |
+          echo "Last 60 lines of the build log:"
+          tail -n 60 "$RUNNER_TEMP/build-log.txt" || echo "(no build log was written)"
+
+      - name: Keep the APK with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: the-forge-apk
+          path: the-forge.apk
+          if-no-files-found: error
+
+      - name: Put the APK on the Releases page
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG=the-forge-apk
+          PASS=$(grep -m1 '^Pass:' "$PROJ/BUILD_INFO.txt" | tr -dc '0-9' || true)
+          NOTES="The Forge for Fire tablet, build ${PASS}. Built $(date -u '+%d %B %Y, %H:%M UTC') from branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA:0:7}.
+          On the tablet: tap the-forge.apk below, then open it from Downloads to install.
+          Each new build installs over the old one and keeps your work."
+          # GitHub's upload server sometimes answers with an error of its own
+          # (HTTP 500), and a later try goes through. Four tries, further apart.
+          publish() {
+            if gh release view "$TAG" > /dev/null 2>&1; then
+              gh release upload "$TAG" the-forge.apk --clobber
+            else
+              gh release create "$TAG" the-forge.apk --target "$GITHUB_SHA" \
+                --title "The Forge for Fire tablet" --notes "$NOTES"
+            fi
+          }
+          OK=0
+          for WAIT in 0 15 30 60; do
+            if [ "$WAIT" -gt 0 ]; then echo "GitHub did not accept it; trying again in $WAIT seconds."; sleep "$WAIT"; fi
+            if publish; then OK=1; break; fi
+          done
+          if [ "$OK" != 1 ]; then echo "::error::GitHub did not accept the-forge.apk after four tries. Run the workflow again later. If an error above says 403 or 'Resource not accessible': Settings, Actions, General, Workflow permissions: Read and write."; exit 1; fi
+          gh release edit "$TAG" --notes "$NOTES" || echo "The release notes could not be updated; the app is in place."
