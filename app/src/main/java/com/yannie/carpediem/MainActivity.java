@@ -142,9 +142,74 @@ public class MainActivity extends Activity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return loader.shouldInterceptRequest(request.getUrl());
             }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                pageFinishedAt = android.os.SystemClock.uptimeMillis();
+            }
+
+            /* PASS 643 (20 October 2026): the page's own process ended (Android reclaims its memory, or the owner chose
+               Start again below). The view that held it cannot be used again, so the screen is made anew with a fresh
+               view; the page's work is in its own storage and comes back with it. Without this the whole app closed. */
+            @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                if (stuckAsk != null) { try { stuckAsk.dismiss(); } catch (Exception ignored) { } stuckAsk = null; }
+                try { ((android.view.ViewGroup) view.getParent()).removeView(view); } catch (Exception ignored) { }
+                try { view.destroy(); } catch (Exception ignored) { }
+                if (view == web) web = null;
+                recreate();
+                return true;
+            }
         });
+        /* PASS 643: the owner's words (20 October 2026): "I want a refresh button added to Ingenium and the Forge, that
+           refreshed the app if it glitches or freezes." The page's own Refresh key cannot be pressed while the page is
+           frozen, so Android's own word that the page has stopped answering (Android 10 and later) brings a question:
+           wait, or start again. It is never asked while the page is still being read the first time. */
+        if (Build.VERSION.SDK_INT >= 29) {
+            web.setWebViewRenderProcessClient(new android.webkit.WebViewRenderProcessClient() {
+                @Override
+                public void onRenderProcessUnresponsive(WebView view, android.webkit.WebViewRenderProcess renderer) {
+                    if (pageFinishedAt == 0 || android.os.SystemClock.uptimeMillis() - pageFinishedAt < 10000) return;
+                    if (stuckAsk != null && stuckAsk.isShowing()) return;
+                    if (stuckWaitUntil > android.os.SystemClock.uptimeMillis()) return;
+                    askStuck(renderer);
+                }
+
+                @Override
+                public void onRenderProcessResponsive(WebView view, android.webkit.WebViewRenderProcess renderer) {
+                    if (stuckAsk != null) { try { stuckAsk.dismiss(); } catch (Exception ignored) { } stuckAsk = null; }
+                }
+            });
+        }
         web.loadUrl("https://appassets.androidplatform.net/assets/the_forge.html");
         setContentView(web);
+    }
+
+    /* PASS 643: the question, when the page has stopped answering */
+    private long pageFinishedAt, stuckWaitUntil;
+    private android.app.AlertDialog stuckAsk;
+
+    @android.annotation.TargetApi(29)
+    private void askStuck(final android.webkit.WebViewRenderProcess renderer) {
+        if (isFinishing()) return;
+        stuckAsk = new android.app.AlertDialog.Builder(this)
+                .setTitle("The Forge is not answering")
+                .setMessage("The page has stopped answering for a while. It may still be painting something large. "
+                        + "You can wait, or start the Forge again; your saved work stays where it is.")
+                .setNegativeButton("Wait", (d, w) -> {
+                    stuckAsk = null;
+                    stuckWaitUntil = android.os.SystemClock.uptimeMillis() + 30000;
+                })
+                .setPositiveButton("Start again", (d, w) -> {
+                    stuckAsk = null;
+                    boolean ended = false;
+                    try { ended = renderer != null && renderer.terminate(); } catch (Exception ignored) { }
+                    // ended: onRenderProcessGone makes the screen anew; otherwise it is made anew here
+                    if (!ended) recreate();
+                })
+                .setCancelable(false)
+                .create();
+        stuckAsk.show();
     }
 
     // Exposed to the page as window.CarpeNative. The page calls saveFile when the
