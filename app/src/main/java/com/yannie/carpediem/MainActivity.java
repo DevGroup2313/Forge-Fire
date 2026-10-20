@@ -47,7 +47,11 @@ public class MainActivity extends Activity {
     // window.CarpeNative.saveFile, which opens the system Save dialog here and
     // writes the chosen file itself. The Save dialog needs no storage permission.
     private static final int SAVE_FILE_REQUEST = 4712;
-    private String pendingSaveB64;
+    // 642: the saves waiting their turn ({name, mime, base64}); the first is the one whose dialog is open.
+    // A single pending file was overwritten when the page saved several at once (Fabrica's five install
+    // packages, the Editor's six), so every dialog wrote the last file's bytes under its own name.
+    private final java.util.ArrayDeque<String[]> saves = new java.util.ArrayDeque<>();
+    private boolean saveOpen;
 
     // THE MICROPHONE, ASKED FOR PROPERLY (build 1044). Granting the page's
     // request is not enough on Android 6 and later: the app itself must hold
@@ -151,28 +155,12 @@ public class MainActivity extends Activity {
     public class CarpeBridge {
         @JavascriptInterface
         public boolean saveFile(final String name, final String mime, final String b64) {
-            try {
-                pendingSaveB64 = b64;
-                final String type = (mime == null || mime.length() == 0) ? "application/octet-stream" : mime;
-                final String fname = (name == null || name.length() == 0) ? "the-forge-backup.json" : name;
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        try {
-                            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                            intent.addCategory(Intent.CATEGORY_OPENABLE);
-                            intent.setType(type);
-                            intent.putExtra(Intent.EXTRA_TITLE, fname);
-                            startActivityForResult(intent, SAVE_FILE_REQUEST);
-                        } catch (Exception e) {
-                            pendingSaveB64 = null;
-                        }
-                    }
-                });
-                return true;
-            } catch (Exception e) {
-                pendingSaveB64 = null;
-                return false;
-            }
+            if (b64 == null) return false;
+            final String type = (mime == null || mime.length() == 0) ? "application/octet-stream" : mime;
+            final String fname = (name == null || name.length() == 0) ? "the-forge-backup.json" : name;
+            synchronized (saves) { saves.add(new String[]{ fname, type, b64 }); }
+            runOnUiThread(new Runnable() { @Override public void run() { nextSave(); } });
+            return true;
         }
 
         // 9s58: THE CLIPBOARD, for the page's own menu (Paste, Paste as plain
@@ -294,8 +282,11 @@ public class MainActivity extends Activity {
         if (requestCode == SAVE_FILE_REQUEST) {
             OutputStream os = null;
             try {
-                if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingSaveB64 != null) {
-                    byte[] bytes = Base64.decode(pendingSaveB64, Base64.DEFAULT);
+                String[] s;
+                synchronized (saves) { s = saves.pollFirst(); saveOpen = false; }
+                String b64 = s == null ? null : s[2];
+                if (resultCode == RESULT_OK && data != null && data.getData() != null && b64 != null) {
+                    byte[] bytes = Base64.decode(b64, Base64.DEFAULT);
                     os = getContentResolver().openOutputStream(data.getData());
                     if (os != null) { os.write(bytes); os.flush(); }
                 }
@@ -304,11 +295,31 @@ public class MainActivity extends Activity {
                 // person can still use Copy to move the backup instead.
             } finally {
                 try { if (os != null) os.close(); } catch (Exception e) {}
-                pendingSaveB64 = null;
+                nextSave();
             }
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    // 642: on the UI thread, the Save dialog for the first file waiting, when none is open
+    private void nextSave() {
+        String[] s;
+        synchronized (saves) {
+            if (saveOpen || saves.isEmpty()) return;
+            saveOpen = true;
+            s = saves.peekFirst();
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType(s[1]);
+            intent.putExtra(Intent.EXTRA_TITLE, s[0]);
+            startActivityForResult(intent, SAVE_FILE_REQUEST);
+        } catch (Exception e) {
+            synchronized (saves) { saves.pollFirst(); saveOpen = false; }
+            nextSave();
+        }
     }
 
     @Override
