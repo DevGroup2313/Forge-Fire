@@ -106,7 +106,7 @@ fresh the-forge.apk and puts it on your repository's Releases page.
 Step 1. Make a repository.
   Sign in at github.com. Click the "+" at the top right, then
   "New repository". Name it, for example the-forge-fire.
-  Choose Private (important: the signing key will live in it).
+  Choose Private (your app's files are yours alone).
   Do NOT tick "Add a README file". Click "Create repository".
   (If you already have a repository for The Forge on the Fire tablet,
   you may use it instead. See "Using a repository you already have".)
@@ -149,40 +149,20 @@ Step 5. Get the APK.
   The same APK is also on the run's own page under "Artifacts", as a zip.
   Now follow Part 1.
 
-THE PERMANENT SIGNING KEY (made by the first build)
-  The first build makes a signing key and saves it in your repository,
-  in a folder named "signing" inside the project. You will see a
-  commit by "github-actions[bot]" called "Keep the permanent signing key
-  for The Forge". Every later build uses that key, which is what lets
-  each new APK install over the old one and keep your work.
-    - Keep the repository Private: the key and its password are in it.
-    - Never delete the "signing" folder.
-    - The first run also keeps a copy of the key under "Artifacts", named
-      signing-key-keep-this. Download it once and store it somewhere safe.
-    - If you ever start a NEW repository for The Forge, upload the
-      "signing" folder into its project too, before the first build.
-      Otherwise the new repository makes a new key, and the tablet will
-      say "App not installed" until you uninstall the old app.
-
-
-UPDATING THE APP LATER (for example with a newer the_forge.html)
-----------------------------------------------------------------
-
-  1. In The Forge, ship the new version as the Fire package again, and
-     unzip it.
-  2. On GitHub open your repository. Click "Add file", then "Upload
-     files", and drop in EVERYTHING inside "Fire tablet project" (the
-     app, its icons, BUILD_INFO.txt and the rest; the files replace the
-     old ones, and the "signing" folder stays). Click "Commit changes".
-  3. Replace the recipe too, since a Mac leaves the .github folder
-     behind: open .github/workflows/build-apk.yml on GitHub, click the
-     pencil, select all, paste GITHUB_WORKFLOW_paste_this.txt over it,
-     and click "Commit changes".
-  4. GitHub builds again by itself (Part 2, Steps 4 and 5). Then install
-     the new APK over the old one (Part 1, Steps 2 and 3). Your work stays.
-  You can also start a build by hand at any time: Actions tab,
-  "Build The Forge APK", "Run workflow".
-
+THE SIGNING KEY (kept in the repository's secrets)
+  Android installs a newer APK over the old one only when both carry the
+  same key, so every build is signed with one key. The key and its
+  password live only in this repository's secrets, never in its files:
+  on github.com open Settings, Secrets and variables, Actions, and add
+    - ANDROID_KEYSTORE_B64: the key file (.p12 or .keystore), as base64;
+    - ANDROID_KEYSTORE_PASSWORD: its password;
+    - ANDROID_KEY_ALIAS: only if the key's name is not "app".
+  Ingenium's Fabrica makes a key on your own device and saves it as a
+  .p12 file (Save this key). Keep the file and its password safe, away
+  from the computer. The key that earlier builds kept in the folder
+  "signing" has been readable by anyone who could read this repository,
+  so it is being replaced; until the new one is in the secrets, the
+  build still uses it, and says so in its log.
 
 USING A REPOSITORY YOU ALREADY HAVE
 -----------------------------------

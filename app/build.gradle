@@ -9,9 +9,9 @@ apply plugin: 'com.android.application'
 // ONE PERMANENT KEY. Android installs a new APK over the old one only when both
 // carry the same signature; otherwise the tablet says "App not installed" and the
 // only way past is to uninstall, which deletes everything saved in the app. So
-// every build is signed with one key kept in this repository. GitHub makes it on
-// the first build and saves it in the folder "signing" (see README.txt). Carpe
-// Diem's earlier key, kept as app/carpe-diem.keystore, is used when present.
+// every build is signed with one key. 644: it is kept in the repository's secrets,
+// never in its files (see README.txt). Until it is there, the old key in the folder
+// "signing", or Carpe Diem's earlier key (app/carpe-diem.keystore), is used.
 def keyProps = new Properties()
 def keyInfo = rootProject.file('signing/signing.properties')
 if (keyInfo.exists()) { keyInfo.withInputStream { keyProps.load(it) } }
@@ -22,6 +22,15 @@ if ((keyStore == null || !keyStore.exists()) && file('carpe-diem.keystore').exis
     keyProps.setProperty('storePassword', 'carpediem')
     keyProps.setProperty('keyAlias', 'carpediem')
     keyProps.setProperty('keyPassword', 'carpediem')
+}
+// 644: the key from the repository's secrets comes first (the workflow puts it in place as signing/release.keystore, its
+// password only in the environment); the files above only until it is there.
+def secretKey = rootProject.file('signing/release.keystore')
+if (secretKey.exists() && System.getenv('ANDROID_KEYSTORE_PASSWORD')) {
+    keyStore = secretKey
+    keyProps.setProperty('storePassword', System.getenv('ANDROID_KEYSTORE_PASSWORD'))
+    keyProps.setProperty('keyAlias', System.getenv('ANDROID_KEY_ALIAS') ?: 'app')
+    keyProps.setProperty('keyPassword', System.getenv('ANDROID_KEYSTORE_PASSWORD'))
 }
 def haveKey = keyStore != null && keyStore.exists()
 

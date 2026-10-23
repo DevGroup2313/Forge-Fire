@@ -71,42 +71,29 @@ jobs:
           unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/gradle-8.7/bin" >> "$GITHUB_PATH"
 
-      - name: Make the permanent signing key (first build only)
-        # Android installs a new APK over the old one only when both are signed
-        # with the SAME key; otherwise the tablet says "App not installed".
-        # The first build makes the key and saves it in this repository, in the
-        # folder "signing". Every later build finds it there and uses it.
+      - name: The signing key (from this repository's secrets, never from its files)
+        # 644: a key and its password live only in the repository's secrets (Settings, Secrets and variables, Actions):
+        # ANDROID_KEYSTORE_B64 (the .p12 or .keystore file, as base64), ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_ALIAS
+        # when its name is not "app". Nothing is ever written back into the repository: a key in a repository's files can
+        # be read by anyone who can read the repository (the key that was kept in the folder "signing" has been, so it is
+        # being replaced). See README.txt.
+        env:
+          KEY_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEY_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           cd "$PROJ"
-          if [ -f signing/signing.properties ] || [ -f app/carpe-diem.keystore ]; then
-            echo "The permanent signing key is already in the repository. It will be used."
-            exit 0
-          fi
           mkdir -p signing
-          PW=$(openssl rand -hex 16)
-          keytool -genkeypair -noprompt -keystore signing/app.keystore -storetype PKCS12 \
-            -storepass "$PW" -keypass "$PW" -alias app -keyalg RSA -keysize 2048 -validity 36500 \
-            -dname "CN=The Forge, O=Yannie D. Forest"
-          printf 'storeFile=app.keystore\nstorePassword=%s\nkeyAlias=app\nkeyPassword=%s\n' "$PW" "$PW" > signing/signing.properties
-          echo "NEW_KEY=1" >> "$GITHUB_ENV"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add signing
-          git commit -m "Keep the permanent signing key for The Forge"
-          git pull --rebase origin "$GITHUB_REF_NAME" || true
-          if git push origin "HEAD:$GITHUB_REF_NAME"; then
-            echo "The new key is saved in the repository, in the folder signing."
+          if [ -n "$KEY_B64" ] && [ -n "$KEY_PASS" ]; then
+            printf '%s' "$KEY_B64" | base64 -d > signing/release.keystore
+            echo "ANDROID_KEYSTORE_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+            [ -n "$KEY_ALIAS" ] && echo "ANDROID_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "Signed with the key in this repository's secrets."
+          elif [ -f signing/signing.properties ] || [ -f app/carpe-diem.keystore ]; then
+            echo "::warning::Signed with the old key kept in the repository's files, which anyone who can read the repository can read: add ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASSWORD to the secrets."
           else
-            echo "::warning::The signing key could not be saved in the repository. Download 'signing-key-keep-this' from this run's Artifacts and upload its files into a folder named signing in the project, or the next build will make a different key."
+            echo "::warning::No signing key in the secrets: this APK is signed with a throwaway key, and the next one will not install over it."
           fi
-
-      - name: Keep a copy of a new signing key with this run
-        if: env.NEW_KEY == '1'
-        uses: actions/upload-artifact@v4
-        with:
-          name: signing-key-keep-this
-          path: ${{ env.PROJ }}/signing
-          if-no-files-found: warn
 
       - name: Build the APK
         run: |
