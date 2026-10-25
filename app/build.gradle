@@ -6,30 +6,19 @@
 */
 apply plugin: 'com.android.application'
 
-// ONE PERMANENT KEY. Android installs a new APK over the old one only when both
-// carry the same signature; otherwise the tablet says "App not installed" and the
-// only way past is to uninstall, which deletes everything saved in the app. So
-// every build is signed with one key. 644: it is kept in the repository's secrets,
-// never in its files (see README.txt). Until it is there, the old key in the folder
-// "signing", or Carpe Diem's earlier key (app/carpe-diem.keystore), is used.
+// ONE KEY. Android installs a new APK over the old one only when it is signed by the same key, or by a new key the old one
+// has vouched for; otherwise the tablet says "App not installed" and the only way past is to uninstall, which deletes
+// everything saved in the app. 647: the key lives in the encrypted signing/the-forge-signing-2026.gpg, opened by the build with
+// the secret ANDROID_SIGNING_PASSPHRASE, which puts it in place as signing/release.keystore (its password only in the
+// environment); the workflow then signs the APK again through the signing lineage (signing/SIGNING.txt). No key is ever kept in
+// this repository's files.
 def keyProps = new Properties()
-def keyInfo = rootProject.file('signing/signing.properties')
-if (keyInfo.exists()) { keyInfo.withInputStream { keyProps.load(it) } }
 def keyStore = null
-if (keyProps.getProperty('storeFile')) { keyStore = rootProject.file('signing/' + keyProps.getProperty('storeFile')) }
-if ((keyStore == null || !keyStore.exists()) && file('carpe-diem.keystore').exists()) {
-    keyStore = file('carpe-diem.keystore')
-    keyProps.setProperty('storePassword', 'carpediem')
-    keyProps.setProperty('keyAlias', 'carpediem')
-    keyProps.setProperty('keyPassword', 'carpediem')
-}
-// 644: the key from the repository's secrets comes first (the workflow puts it in place as signing/release.keystore, its
-// password only in the environment); the files above only until it is there.
 def secretKey = rootProject.file('signing/release.keystore')
 if (secretKey.exists() && System.getenv('ANDROID_KEYSTORE_PASSWORD')) {
     keyStore = secretKey
     keyProps.setProperty('storePassword', System.getenv('ANDROID_KEYSTORE_PASSWORD'))
-    keyProps.setProperty('keyAlias', System.getenv('ANDROID_KEY_ALIAS') ?: 'app')
+    keyProps.setProperty('keyAlias', System.getenv('ANDROID_KEY_ALIAS') ?: 'forge')
     keyProps.setProperty('keyPassword', System.getenv('ANDROID_KEYSTORE_PASSWORD'))
 }
 def haveKey = keyStore != null && keyStore.exists()
@@ -47,7 +36,7 @@ android {
         // updates, and this one never goes backwards, whichever repository
         // or computer builds it.
         versionCode ((int) ((System.currentTimeMillis() - 1735689600000L) / 60000L))
-        versionName '646'
+        versionName '647'
     }
 
     if (haveKey) {

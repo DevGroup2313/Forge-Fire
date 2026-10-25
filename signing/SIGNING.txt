@@ -1,0 +1,46 @@
+THE FORGE  |  Copyright (c) 2026 Yannie D. Forest. All rights reserved.
+See LICENCE.txt.
+
+The signing key
+===============
+
+Android installs an update over an existing app only when the update is
+signed by the same key, or by a new key that the old key has vouched for.
+
+The Forge's old key was kept in this public repository, where anyone
+could read it, so it is being replaced. On
+25 October 2026 a new key was made, together with a record in which the
+old key vouches for the new one (lineage-2026.bin). Both keys are kept in
+one encrypted file, the-forge-signing-2026.gpg (AES-256). It opens only
+with one passphrase, which is never written in this repository.
+
+What the owner does, once
+-------------------------
+
+1. On github.com, open this repository (Forge-Fire).
+2. Open Settings, then Secrets and variables, then Actions.
+3. Press New repository secret.
+4. Name: ANDROID_SIGNING_PASSPHRASE
+   Secret: the passphrase you were given (paste it exactly).
+5. Press Add secret.
+6. Open Actions, choose "Build The Forge APK", and press
+   Run workflow. The next build is signed with the new key.
+
+What happens then
+-----------------
+
+- The Fire tablet updates The Forge as usual. Nothing is removed and your
+  work stays.
+- From then on, an app signed with the old key alone no longer installs
+  over yours. This is what protects you.
+- Until the secret is added, a build publishes nothing: the APK on the
+  Releases page stays the one you have, because an APK signed with any
+  other key would not install over it.
+- The old key's files (app.keystore and signing.properties) were in this
+  public repository, so they have been taken out of it. They stay in the
+  repository's history: make the repository private (Settings, General,
+  Danger Zone, Change visibility) so that history is no longer public.
+
+Keep the passphrase safe and private, with a copy away from the computer.
+Anyone with this repository and the passphrase could sign apps as you.
+Without the passphrase, the encrypted file is of no use to anyone.

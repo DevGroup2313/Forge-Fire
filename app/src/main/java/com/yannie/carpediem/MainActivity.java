@@ -66,6 +66,16 @@ public class MainActivity extends Activity {
     // 9s58: the longest the page waits for the clipboard (see CarpeBridge.readClipboard).
     private static final long CLIPBOARD_WAIT_MS = 1000;
 
+    // 647 (security audit, 25 October 2026): the Forge's own address, the one permission a page may be
+    // granted, and the key a clipboard read must carry (made anew each time the screen is made).
+    private static final String OWN_HOST = "appassets.androidplatform.net";
+    private static final String[] MIC_ONLY = new String[]{ PermissionRequest.RESOURCE_AUDIO_CAPTURE };
+    private final String clipToken = java.util.UUID.randomUUID().toString();
+
+    private static boolean ownOrigin(Uri u) {
+        return u != null && "https".equalsIgnoreCase(u.getScheme()) && OWN_HOST.equalsIgnoreCase(u.getHost());
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -74,13 +84,14 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
-        s.setAllowFileAccess(true);
-        // A floating window is an iframe pointing at this same file, so the
-        // WebView must let a file:// page load a file:// subframe. Without
-        // these the floating windows stay blank on some WebView versions.
+        // 647 (security audit, 25 October 2026): the page is served from the app's own address
+        // (https://appassets.androidplatform.net, below), never opened as a file, so no page in this
+        // view is given the device's files.
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
         try {
-            s.setAllowFileAccessFromFileURLs(true);
-            s.setAllowUniversalAccessFromFileURLs(true);
+            s.setAllowFileAccessFromFileURLs(false);
+            s.setAllowUniversalAccessFromFileURLs(false);
         } catch (Throwable ignored) {
         }
         s.setMediaPlaybackRequiresUserGesture(false);
@@ -97,6 +108,9 @@ public class MainActivity extends Activity {
                         for (String r : request.getResources()) {
                             if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) wantsMic = true;
                         }
+                        // 647: the microphone, and nothing else, and only for the Forge's own page and
+                        // its own apps (a page shown apart, or any other address, is refused)
+                        if (!wantsMic || !ownOrigin(request.getOrigin())) { try { request.deny(); } catch (Exception e) {} return; }
                         if (wantsMic && Build.VERSION.SDK_INT >= 23
                                 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                             if (pendingMic != null) { try { pendingMic.deny(); } catch (Exception e) {} }
@@ -104,7 +118,7 @@ public class MainActivity extends Activity {
                             requestPermissions(new String[]{ Manifest.permission.RECORD_AUDIO }, MIC_REQUEST);
                             return;
                         }
-                        request.grant(request.getResources());
+                        request.grant(MIC_ONLY);
                     }
                 });
             }
@@ -146,6 +160,28 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 pageFinishedAt = android.os.SystemClock.uptimeMillis();
+                // 647: the key the Forge's own page gives with a clipboard read, put into the main frame only
+                // (evaluateJavascript runs there), so a frame inside it cannot read the clipboard
+                if (url != null && ownOrigin(Uri.parse(url))) {
+                    try { view.evaluateJavascript("window.__cnTok=" + JSONObject.quote(clipToken) + ";", null); } catch (Exception ignored) { }
+                }
+            }
+
+            // 647: a link to another address opens in the device's browser, never in place of the Forge (the
+            // Forge's bridge, CarpeNative, is given to every page this view shows)
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Uri u = request.getUrl();
+                String sc = u == null || u.getScheme() == null ? "" : u.getScheme().toLowerCase(java.util.Locale.ROOT);
+                if (sc.equals("blob") || sc.equals("data") || sc.equals("about") || sc.equals("javascript")) return sc.equals("javascript");
+                if (ownOrigin(u)) return false;
+                if (request.isForMainFrame() || !(sc.equals("http") || sc.equals("https"))) {
+                    if (sc.equals("http") || sc.equals("https") || sc.equals("mailto") || sc.equals("tel")) {
+                        try { startActivity(new Intent(Intent.ACTION_VIEW, u).addCategory(Intent.CATEGORY_BROWSABLE)); } catch (Exception ignored) { }
+                    }
+                    return true;
+                }
+                return false;
             }
 
             /* PASS 643 (20 October 2026): the page's own process ended (Android reclaims its memory, or the owner chose
@@ -239,8 +275,16 @@ public class MainActivity extends Activity {
         // never held longer. The answer is null (read) or false (write) when it
         // could not be done in that time or Android refused: the page then tries
         // its next way.
+        // 647: only with the key the Forge's own page holds (a frame inside it, or a page shown apart, has
+        // no key, and reads nothing); without one the page tries its next way
         @JavascriptInterface
         public String readClipboard() {
+            return null;
+        }
+
+        @JavascriptInterface
+        public String readClipboard(final String key) {
+            if (key == null || !clipToken.equals(key)) return null;
             final String[] answer = new String[1];
             if (!onUiThread(new Runnable() {
                 @Override public void run() { answer[0] = readClipboardNow(); }
@@ -394,7 +438,7 @@ public class MainActivity extends Activity {
             pendingMic = null;
             if (req == null) return;
             boolean ok = grantResults != null && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-            try { if (ok) req.grant(req.getResources()); else req.deny(); } catch (Exception e) {}
+            try { if (ok) req.grant(MIC_ONLY); else req.deny(); } catch (Exception e) {}
             return;
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
