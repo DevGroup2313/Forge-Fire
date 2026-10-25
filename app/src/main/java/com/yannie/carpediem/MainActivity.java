@@ -292,8 +292,16 @@ public class MainActivity extends Activity {
             return answer[0];
         }
 
+        // 648 (second review): writing, like reading, only with the key the Forge's own page holds; a frame
+        // inside it, or a page shown apart, cannot overwrite the clipboard
         @JavascriptInterface
         public boolean writeClipboard(final String text, final String html) {
+            return false;
+        }
+
+        @JavascriptInterface
+        public boolean writeClipboard(final String text, final String html, final String key) {
+            if (key == null || !clipToken.equals(key)) return false;
             final boolean[] answer = new boolean[1];
             if (!onUiThread(new Runnable() {
                 @Override public void run() { answer[0] = writeClipboardNow(text, html); }
@@ -305,7 +313,7 @@ public class MainActivity extends Activity {
         // so writeClipboard(text) alone needs this one.
         @JavascriptInterface
         public boolean writeClipboard(final String text) {
-            return writeClipboard(text, null);
+            return false;
         }
     }
 
