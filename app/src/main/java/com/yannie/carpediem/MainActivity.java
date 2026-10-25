@@ -70,15 +70,16 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
-        s.setAllowFileAccess(true);
-        // A floating window is an iframe pointing at this same file, so the
-        // WebView must let a file:// page load a file:// subframe. Without
-        // these the floating windows stay blank on some WebView versions.
+        // Build 1059: the page is served from the app's own assets
+        // (appassets.androidplatform.net), so no page needs to read files
+        // from the device's storage: file access stays off.
+        s.setAllowFileAccess(false);
         try {
-            s.setAllowFileAccessFromFileURLs(true);
-            s.setAllowUniversalAccessFromFileURLs(true);
+            s.setAllowFileAccessFromFileURLs(false);
+            s.setAllowUniversalAccessFromFileURLs(false);
         } catch (Throwable ignored) {
         }
+        try { WebView.setWebContentsDebuggingEnabled(false); } catch (Throwable ignored) { }
         s.setMediaPlaybackRequiresUserGesture(false);
         web.setBackgroundColor(Color.parseColor("#1B6B93"));
         // The app loads only its own HTML from assets, so the only page that can

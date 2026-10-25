@@ -23,8 +23,13 @@
          background shows there, and a transparent background is drawn white by
          the launcher. That was the white square behind the seal. With only the
          legacy transparent PNG, the Fire launcher draws the seal as it is. -->
+    <!-- Build 1059: the work kept in the app stays on this tablet. No cloud
+         backup, no copy by device transfer or adb backup; the app's own Export
+         moves it. On uninstall Android offers to keep the app's data. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:hasFragileUserData="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@android:style/Theme.NoTitleBar">
