@@ -114,7 +114,7 @@ jobs:
             echo "FORGE_LINEAGE=$GITHUB_WORKSPACE/$PROJ/signing/lineage-2026.bin"
             echo "FORGE_SIGN_MODE=lineage"
           } >> "$GITHUB_ENV"
-          echo "The Forge's key (25 October 2026) is ready, handed over from the old key by the signing lineage."
+          echo "The Forge's new key (27 October 2026) is ready, handed over from the old key by the signing lineage."
 
       - name: Build the APK
         run: |
