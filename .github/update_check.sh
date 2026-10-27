@@ -34,4 +34,7 @@ else
 fi
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1; sleep 12
 adb shell pidof "$PKG" > /dev/null && echo "the Forge is running after the update" || { echo "::error::the Forge did not stay open after the update"; FAIL=1; }
+# The emulator action asks the emulator to stop once this script ends, but its process can stay alive and hold the step open
+# until the job's time runs out (27 October 2026). A moment after the action's own request, whatever is left is stopped.
+setsid bash -c 'sleep 10; pkill -9 -f qemu-system-x86_64; pkill -9 -f crashpad_handler' > /dev/null 2>&1 < /dev/null &
 exit $FAIL
