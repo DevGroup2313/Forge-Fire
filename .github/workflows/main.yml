@@ -72,23 +72,33 @@ jobs:
           echo "$RUNNER_TEMP/gradle-8.7/bin" >> "$GITHUB_PATH"
 
       - name: The signing key (from this repository's secrets, never from its files)
-        # 647 (25 October 2026): the key that was kept in the folder "signing" was in a public repository, so it is replaced.
-        # The new key and the old one ride in signing/the-forge-signing-2026.gpg, encrypted with AES-256 under one passphrase
-        # that lives only in the secret ANDROID_SIGNING_PASSPHRASE. With it, the app is signed through the signing lineage
-        # (signing/lineage-2026.bin): the old key vouches for the new one, so the Forge installed on a tablet updates without
-        # being removed, and from then on an app signed with the old key alone no longer installs over it. Without the
-        # passphrase nothing is published: an app signed with another key would not install over the one on the tablet.
-        # See signing/SIGNING.txt.
+        # With the secret ANDROID_SIGNING_PASSPHRASE, signing/the-forge-signing-2026.gpg opens and the app is signed through
+        # the signing lineage (signing/lineage-2026.bin): the old key vouches for the new one, so the Forge on a tablet updates
+        # in place, and from then on an app signed with the old key alone no longer installs over it.
+        # Without the secret, the app is signed with the old key, the one the Forge on the tablet already has, so it still
+        # installs as an update. The old key is read from this repository's history (the commit that first kept it), never
+        # written into its files. See signing/SIGNING.txt.
         env:
           SIGN_PASS: ${{ secrets.ANDROID_SIGNING_PASSPHRASE }}
         run: |
           cd "$PROJ"
           mkdir -p signing
-          if [ -z "$SIGN_PASS" ] || [ ! -f signing/the-forge-signing-2026.gpg ]; then
-            echo "::error::The secret ANDROID_SIGNING_PASSPHRASE is not set, so the app cannot be signed with the Forge's key. Nothing is published; the APK on the Releases page stays as it is. Add the secret (signing/SIGNING.txt) and run this again."
-            exit 1
-          fi
           S="$RUNNER_TEMP/forge-signing"; mkdir -p -m 700 "$S"
+          if [ -z "$SIGN_PASS" ] || [ ! -f signing/the-forge-signing-2026.gpg ]; then
+            OLD=d085ce9399000044501d3a20b9332e246b1dfc52
+            git fetch --no-tags --depth 1 origin "$OLD" > /dev/null 2>&1 \
+              || { echo "::error::The old signing key could not be read from the repository's history, and the secret ANDROID_SIGNING_PASSPHRASE is not set. Add the secret (signing/SIGNING.txt) and run this again."; exit 1; }
+            git show "$OLD:signing/app.keystore" > "$S/old.keystore"
+            OLDPW=$(git show "$OLD:signing/signing.properties" | sed -n 's/^storePassword=//p' | tr -d '\r')
+            echo "::add-mask::$OLDPW"
+            {
+              echo "FORGE_SIGN_MODE=old"
+              echo "FORGE_OLD_KEYSTORE=$S/old.keystore"
+              echo "FORGE_OLD_KEY_PASS=$OLDPW"
+            } >> "$GITHUB_ENV"
+            echo "::warning::The secret ANDROID_SIGNING_PASSPHRASE is not set, so this build is signed with the Forge's old key (the one the app on the tablet already has) and installs over it as an update. Add the secret (signing/SIGNING.txt) to move the app to its new key."
+            exit 0
+          fi
           export GNUPGHOME="$S/gnupg"; mkdir -p -m 700 "$GNUPGHOME"
           printf '%s' "$SIGN_PASS" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
             --decrypt signing/the-forge-signing-2026.gpg | tar -x -C "$S" \
@@ -102,6 +112,7 @@ jobs:
             echo "FORGE_OLD_KEYSTORE=$S/old.keystore"
             echo "FORGE_OLD_KEY_PASS=$OLDPW"
             echo "FORGE_LINEAGE=$GITHUB_WORKSPACE/$PROJ/signing/lineage-2026.bin"
+            echo "FORGE_SIGN_MODE=lineage"
           } >> "$GITHUB_ENV"
           echo "The Forge's key (25 October 2026) is ready, handed over from the old key by the signing lineage."
 
@@ -114,9 +125,14 @@ jobs:
           # key, vouched for by the old one, for Android 9 and newer (Scheme 3). Passwords from the environment only.
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           "$BT/zipalign" -f -p 4 app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/aligned.apk"
-          "$BT/apksigner" sign --ks "$FORGE_OLD_KEYSTORE" --ks-key-alias app --ks-pass env:FORGE_OLD_KEY_PASS --key-pass env:FORGE_OLD_KEY_PASS \
-            --next-signer --ks signing/release.keystore --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD \
-            --lineage "$FORGE_LINEAGE" --rotation-min-sdk-version 28 --out "$GITHUB_WORKSPACE/the-forge.apk" "$RUNNER_TEMP/aligned.apk"
+          if [ "$FORGE_SIGN_MODE" = lineage ]; then
+            "$BT/apksigner" sign --ks "$FORGE_OLD_KEYSTORE" --ks-key-alias app --ks-pass env:FORGE_OLD_KEY_PASS --key-pass env:FORGE_OLD_KEY_PASS \
+              --next-signer --ks signing/release.keystore --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD \
+              --lineage "$FORGE_LINEAGE" --rotation-min-sdk-version 28 --out "$GITHUB_WORKSPACE/the-forge.apk" "$RUNNER_TEMP/aligned.apk"
+          else
+            "$BT/apksigner" sign --ks "$FORGE_OLD_KEYSTORE" --ks-key-alias app --ks-pass env:FORGE_OLD_KEY_PASS --key-pass env:FORGE_OLD_KEY_PASS \
+              --out "$GITHUB_WORKSPACE/the-forge.apk" "$RUNNER_TEMP/aligned.apk"
+          fi
           "$BT/apksigner" verify --min-sdk-version 22 --print-certs "$GITHUB_WORKSPACE/the-forge.apk" | grep -E "Signer|SHA-256" | head -6
           ls -la "$GITHUB_WORKSPACE/the-forge.apk"
 
@@ -155,7 +171,7 @@ jobs:
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash .github/update_check.sh "${{ runner.temp }}/prev/the-forge.apk" "${{ github.workspace }}/the-forge.apk"
+          script: bash .github/update_check.sh "${{ runner.temp }}/prev/the-forge.apk" "${{ github.workspace }}/the-forge.apk" "${{ env.FORGE_SIGN_MODE }}"
 
       - name: If the build failed, show why
         if: failure()
@@ -180,6 +196,13 @@ jobs:
           NOTES="The Forge for Fire tablet, build ${PASS}. Built $(date -u '+%d %B %Y, %H:%M UTC') from branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA:0:7}.
           On the tablet: tap the-forge.apk below, then open it from Downloads to install.
           Each new build installs over the old one and keeps your work."
+          # Every branch builds, and all of them publish to this one release. A build older than the one already
+          # published is kept with its run (Artifacts) but never replaces the newer APK on the Releases page.
+          CUR=$(gh release view "$TAG" --json body -q .body 2>/dev/null | grep -o 'build [0-9]\+' | head -n 1 | tr -dc '0-9' || true)
+          if [ -n "$CUR" ] && [ -n "$PASS" ] && [ "$PASS" -lt "$CUR" ]; then
+            echo "::warning::The Releases page already has The Forge $CUR, newer than this build ($PASS). It stays there; this APK is kept with this run only."
+            exit 0
+          fi
           # GitHub's upload server sometimes answers with an error of its own
           # (HTTP 500), and a later try goes through. Four tries, further apart.
           publish() {

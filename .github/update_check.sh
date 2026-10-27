@@ -6,9 +6,11 @@
 # key) is installed and opened; this build's APK is installed over it and must be taken as an update of the same app (its
 # first install time kept, so what the app stored stays); then the earlier APK must be refused over the new one, because the
 # new key took over and the old key alone can no longer replace it.
-#   bash .github/update_check.sh <earlier.apk> <new.apk>
+# When the build was signed with the old key (the secret not yet set, MODE "old"), the earlier APK may still install over it,
+# so that last check is left out.
+#   bash .github/update_check.sh <earlier.apk> <new.apk> [lineage|old]
 set -u
-PREV="$1"; NEW="$2"; PKG=com.yannieforest.theforge; FAIL=0
+PREV="$1"; NEW="$2"; MODE="${3:-lineage}"; PKG=com.yannieforest.theforge; FAIL=0
 first() { adb shell dumpsys package "$PKG" | grep -m1 firstInstallTime | tr -d '\r' | sed 's/^ *//'; }
 adb wait-for-device
 if [ -f "$PREV" ]; then
@@ -19,9 +21,13 @@ if [ -f "$PREV" ]; then
   echo "$OUT" | grep -q Success || { echo "::error::this build did not install over the earlier one (as on the tablet)"; FAIL=1; }
   T1=$(first); echo "after the update: $T1"
   [ -n "$T0" ] && [ "$T0" = "$T1" ] || { echo "::error::the app was installed afresh rather than updated, so what it stored would be lost"; FAIL=1; }
-  OUT=$(adb install -r -d "$PREV" 2>&1); echo "$OUT"
-  if echo "$OUT" | grep -q Success; then echo "::error::an APK signed with the old key alone still installs over the new one"; FAIL=1;
-  else echo "the old key alone is refused now: $(echo "$OUT" | grep -o 'INSTALL_FAILED[A-Z_]*' | head -1)"; fi
+  if [ "$MODE" = lineage ]; then
+    OUT=$(adb install -r -d "$PREV" 2>&1); echo "$OUT"
+    if echo "$OUT" | grep -q Success; then echo "::error::an APK signed with the old key alone still installs over the new one"; FAIL=1;
+    else echo "the old key alone is refused now: $(echo "$OUT" | grep -o 'INSTALL_FAILED[A-Z_]*' | head -1)"; fi
+  else
+    echo "signed with the old key (the secret is not set yet): the new key takes over once it is"
+  fi
 else
   echo "no earlier APK: this build is installed on its own"
   adb install "$NEW" | grep -q Success || { echo "::error::this build did not install on the emulator"; FAIL=1; }

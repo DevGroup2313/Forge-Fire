@@ -33,9 +33,12 @@ What happens then
   work stays.
 - From then on, an app signed with the old key alone no longer installs
   over yours. This is what protects you.
-- Until the secret is added, a build publishes nothing: the APK on the
-  Releases page stays the one you have, because an APK signed with any
-  other key would not install over it.
+- Until the secret is added, each build is signed with the old key, the
+  one the app on your tablet already has, so it still installs over it as
+  an update. The build's log says so with a yellow warning.
+- A build never replaces a newer one on the Releases page: if the page
+  already holds a higher build number, the older build is kept only with
+  its own run.
 - The old key's files (app.keystore and signing.properties) were in this
   public repository, so they have been taken out of it. They stay in the
   repository's history: make the repository private (Settings, General,
