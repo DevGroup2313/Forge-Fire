@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Get the project
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Find the Gradle project
         # Works whether the project was uploaded at the top of the repository
@@ -181,7 +181,7 @@ jobs:
           tail -n 60 "$RUNNER_TEMP/build-log.txt" || echo "(no build log was written)"
 
       - name: Keep the APK with this run
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: the-forge-apk
           path: the-forge.apk
