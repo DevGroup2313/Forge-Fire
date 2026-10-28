@@ -7,7 +7,7 @@ See LICENCE.txt. Every distributed copy carries a build marker.
 THE FORGE ON THE FIRE TABLET
 ============================
 
-Build 651 (9s83), 2026-10-28. Made by The Forge, 28 October 2026.
+Build 652 (9s84), 2026-10-28. Made by The Forge, 28 October 2026.
 
 This package holds everything needed to put The Forge on a Fire tablet
 (or any Android tablet or phone), and to rebuild it yourself later on

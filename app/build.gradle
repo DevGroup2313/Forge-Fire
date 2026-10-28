@@ -36,7 +36,7 @@ android {
         // updates, and this one never goes backwards, whichever repository
         // or computer builds it.
         versionCode ((int) ((System.currentTimeMillis() - 1735689600000L) / 60000L))
-        versionName '651'
+        versionName '652'
     }
 
     if (haveKey) {
